@@ -1,0 +1,251 @@
+!pip install -q -U transformers==4.37.2
+!pip install -q bitsandbytes==0.41.3 accelerate==0.25.0
+!pip install -q git+https://github.com/openai/whisper.git
+!pip install -q gradio
+!pip install -q gTTS
+
+import torch
+from transformers import BitsAndBytesConfig, pipeline
+
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16
+)
+
+model_id = "llava-hf/llava-1.5-7b-hf"
+
+pipe = pipeline(
+    "image-to-text",
+    model=model_id,
+    model_kwargs={"quantization_config": quantization_config}
+)
+
+pipe
+
+import whisper
+import gradio as gr
+import time
+import warnings
+import os
+from gtts import gTTS
+from PIL import Image
+
+from google.colab import drive
+drive.mount ('/content/drive')
+
+image_path = "/content/drive/MyDrive/skin.jpg"
+
+image = Image.open((image_path))
+
+image
+
+import nltk
+nltk.download('punkt')
+from nltk import sent_tokenize
+
+max_new_tokens = 250
+
+prompt_instructions = """
+Describe the image using as much as  detail as possible.
+You are a helpful AI assistent who is able to answer questions about the image.
+What is the image all about?
+Now generate the helpful answer.
+"""
+
+prompt = "user: <image>\n" + prompt_instructions + "\nAssistant:"
+
+outputs = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": max_new_tokens})
+
+outputs
+
+for sent in sent_tokenize(outputs[0]["generated_text"]):
+    print(sent)
+
+warnings.filterwarnings("ignore")
+
+import numpy as np
+
+torch.cuda.is_available()
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+print(f"using torch {torch.__version__} {DEVICE}")
+
+import whisper
+
+whisper = whisper.load_model("medium", device=DEVICE)
+
+model = "This is a model variable"
+
+print(f"Model is {'multilingual' if model == 'multilingual' else 'English-only'} and has some parameters.")
+
+import re
+import datetime
+
+tstamp = datetime.datetime.now()
+tstamp = str(tstamp).replace(" ", "_")
+logfile = f"log_{tstamp}.txt"
+
+def writehistory(text):
+    with open(logfile, "a", encoding='utf-8') as f:
+        f.write(text)
+        f.write("\n")
+    f.close()
+
+import requests
+
+def img2txt(input_text, input_image):
+
+    image = Image.open(input_image)
+
+    writehistory(f"Input text: {input_text} - Type: {type(input_text)} - Dir: {dir(input_text)}")
+    if type(input_text) == tuple:
+        prompt_instructions = """
+        Describe the image using as much as  detail as possible.
+        You are a helpful AI assistent who is able to answer questions about the image.
+        What is the image all about?
+        Now generate the helpful answer.
+        """
+    else:
+        prompt_instructions = """
+        Act as an expert in imagery descriptive analysis, using as much detail as possible from the image, respond to the following prompt:
+        """ + input_text
+
+    writehistory(f"prompt_instructions: {prompt_instructions}")
+    prompt = "USER: <image>\n" + prompt_instructions + "\nASSISTANT:"
+
+    outputs = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 250})
+
+    if outputs is not None and len(outputs[0]["generated_text"]) > 0:
+        match = re.search(r'ASSISTANT:\s*(.*)', outputs[0]["generated_text"])
+        if match:
+            reply = match.group(1)
+        else:
+            reply = "No response found."
+    else:
+        reply = "No response generated."
+
+    return reply
+
+def transcribe(audio):
+
+    if audio is None or audio == '':
+        return ('','',None)
+
+    audio = whisper.load_audio(audio)
+    audio = whisper.pad_or_trim(audio)
+
+    mel = whisper.log_mel_spectrogram(audio).to(model.device)
+
+    _, probs = model.detect_language(mel)
+
+    options = whisper.DecodingOptions()
+    result = whisper.decode(model, mel, options)
+    result_text = result.text
+
+    return result_text
+
+def text_to_speech(text, file_path):
+    language = 'en'
+
+    audioobj = gTTS(text = text,
+                    lang = language,
+                    slow = False)
+
+    audioobj.save(file_path)
+
+    return file_path
+
+import locale
+
+print(locale.getlocale())
+
+import locale
+locale.getpreferredencoding = lambda: "UTF-8"
+
+!ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 10 -q:a 9 -acodec libmp3lame Temp.mp3
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+
+def create_model():
+    model = Sequential([
+        Dense(128, activation='relu', input_shape=(784,)),
+        Dense(64, activation='relu'),
+        Dense(10, activation='softmax')
+    ])
+
+    return model
+
+model = create_model()
+
+LEARNING_RATE = 0.001
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model.summary()
+
+
+def evaluate_accuracy(predicted_text, reference_text):
+    """
+    Evaluate the accuracy of the predicted text against the reference text.
+
+    Args:
+    predicted_text (str): The text generated by the model.
+    reference_text (str): The ground truth text to compare against.
+
+    Returns:
+    float: Accuracy score as a fraction of matched words.
+    """
+    predicted_words = set(predicted_text.lower().split())
+    reference_words = set(reference_text.lower().split())
+
+    common_words = predicted_words.intersection(reference_words)
+
+    accuracy = len(common_words) / len(reference_words) if reference_words else 0
+
+    return accuracy
+
+predicted_text_example = "The image shows a beautiful sunset over the ocean."
+reference_text_example = "The image depicts a stunning sunset over the sea."
+
+accuracy = evaluate_accuracy(predicted_text_example, reference_text_example)
+print(f"Accuracy: {accuracy:.2f}")
+
+import gradio as gr
+import base64
+import os
+
+def process_inputs(audio_path, image_path):
+    speech_to_text_output = transcribe(audio_path)
+
+    if image_path:
+        chatgpt_output = img2txt(speech_to_text_output, image_path)
+    else:
+        chatgpt_output = "No image provided."
+
+    processed_audio_path = text_to_speech(chatgpt_output, "Temp3.mp3")
+
+    return speech_to_text_output, chatgpt_output, processed_audio_path
+
+iface = gr.Interface(
+    fn=process_inputs,
+    inputs=[
+        gr.Audio(sources=["microphone"], type="filepath"),
+        gr.Image(type="filepath")
+    ],
+    outputs=[
+        gr.Textbox(label="Speech to Text"),
+        gr.Textbox(label="ChatGPT Output"),
+        gr.Audio("Temp.mp3")
+    ],
+    title="AI-Powered Visual and Audio Interaction with Real-Time Feedback",
+    description="Upload an image and interact via voice input and audio response."
+)
+
+iface.launch(debug=True)
+
